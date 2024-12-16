@@ -1,0 +1,6 @@
+<testsuites name="results">
+  <testsuite name="all" package="all">
+    <property name="random_seed" value="1734318029" />
+    <testcase name="test_quantile" classname="test_quantile" file="/Users/rickgao/Documents/GitHub/ASIC-for-Quantile-Regression/test_quantile.py" lineno="247" time="0.02481698989868164" sim_time_ns="1030.001" ratio_time="41503.865062004035" />
+  </testsuite>
+</testsuites>
