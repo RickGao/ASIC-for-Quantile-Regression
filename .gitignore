@@ -2,3 +2,6 @@
 .DS_Store
 .idea/ASIC-for-Quantile-Regression.iml
 /.idea
+/__pycache__
+results.xml
+/sim_build

@@ -176,7 +176,7 @@ async def instruction(dut, opname, rd, rs1, rs2, index=0):
     instruction = (opcode << 28) | (rs2_address << 23) | (rs1_address << 18) | (rd_address << 13) | (index << 8)
 
     # Log details
-    dut._log.info(f"LOAD {rd} {rs1} {rs2} {index}")
+    dut._log.info(f"{opname} {rd} {rs1} {rs2} {index}")
     dut._log.info(f"rd: {rd_address}, Opcode: {bin(opcode)[2:]}")
 
     dut.instruction.value = instruction
