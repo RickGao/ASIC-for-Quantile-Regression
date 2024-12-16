@@ -1,6 +1,0 @@
-<testsuites name="results">
-  <testsuite name="all" package="all">
-    <property name="random_seed" value="1734244892" />
-    <testcase name="test_vector_processor_comprehensive" classname="test_vector_processor" file="/Users/rickgao/Desktop/quantile/vpu/test_vector_processor.py" lineno="106" time="0.009566068649291992" sim_time_ns="350.001" ratio_time="36587.75750327742" />
-  </testsuite>
-</testsuites>
