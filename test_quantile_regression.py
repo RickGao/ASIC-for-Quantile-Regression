@@ -18,21 +18,22 @@ OPCODES = {
     "STORE": 0b1001
 }
 
+
 class PerformanceMetrics:
     def __init__(self):
         self.cycle_counts = defaultdict(list)
         self.operation_counts = defaultdict(int)
         self.start_time = 0
         self.total_cycles = 0
-        
+
     def start_operation(self, current_time):
         self.start_time = current_time
-        
+
     def end_operation(self, operation, current_time):
         cycles = current_time - self.start_time
         self.cycle_counts[operation].append(cycles)
         self.operation_counts[operation] += 1
-        
+
     def print_metrics(self):
         print("\nPerformance Metrics Summary:")
         print("-" * 50)
@@ -45,6 +46,7 @@ class PerformanceMetrics:
             count = self.operation_counts[op]
             print(f"{op:<15} {avg:<12.2f} {min_cycles:<8} {max_cycles:<8} {count:<8}")
         print(f"\nTotal Cycles: {self.total_cycles}")
+
 
 class Fixed:
     OVERFLOW_CHECK = True  # Global constant to enable or disable overflow checking
@@ -182,10 +184,11 @@ class Fixed:
         """
         return f"{self.to_float()}"
 
+
 async def instruction(dut, metrics, opname, rd, rs1, rs2, index=0):
     current_time = cocotb.utils.get_sim_time('ns')
     metrics.start_operation(current_time)
-    
+
     opcode = OPCODES[opname]
     rd_address = int(rd[1:])
     rs1_address = int(rs1[1:])
@@ -198,23 +201,27 @@ async def instruction(dut, metrics, opname, rd, rs1, rs2, index=0):
 
     dut.instruction.value = instruction
     await ClockCycles(dut.clk, 1)
-    
+
     current_time = cocotb.utils.get_sim_time('ns')
     metrics.end_operation(opname, current_time)
+
 
 async def load(dut, metrics, rd, input_vec):
     current_time = cocotb.utils.get_sim_time('ns')
     metrics.start_operation(current_time)
-    
+
     opcode = OPCODES["LOAD"]
     rd_address = int(rd[1:])
     instruction = (opcode << 28) | (rd_address << 13)
+
+    dut._log.info(f"LOAD {rd} {input_vec}")
+    dut._log.info(f"rd: {rd_address}, Opcode: {bin(opcode)[2:]}")
 
     for i in range(VECTOR_SIZE):
         dut.instruction.value = instruction | (i << 8)
         dut.input_data.value = input_vec[i].to_binary()
         await ClockCycles(dut.clk, 1)
-        
+
     current_time = cocotb.utils.get_sim_time('ns')
     metrics.end_operation("LOAD", current_time)
 
@@ -222,17 +229,20 @@ async def load(dut, metrics, rd, input_vec):
 async def store(dut, metrics, rs2, expect_vec=None):
     current_time = cocotb.utils.get_sim_time('ns')
     metrics.start_operation(current_time)
-    
+
     opcode = OPCODES["STORE"]
     rs2_address = int(rs2[1:])
     instruction = (opcode << 28) | (rs2_address << 23)
 
     output_vec = [None] * VECTOR_SIZE
 
+    dut._log.info(f"STORE {rs2}")
+    dut._log.info(f"rs2: {rs2_address}, Opcode: {bin(opcode)[2:]}")
+
     # Add debug output
     # dut._log.info(f"\nSTORE operation debug:")
-    dut._log.info(f"rs2_address: {rs2_address}")
-    dut._log.info(f"instruction: {hex(instruction)}")
+    # dut._log.info(f"rs2_address: {rs2_address}")
+    # dut._log.info(f"instruction: {hex(instruction)}")
 
     for i in range(VECTOR_SIZE):
         dut.instruction.value = instruction | (i << 8)
@@ -241,32 +251,33 @@ async def store(dut, metrics, rs2, expect_vec=None):
         dut._log.info(f"STORE index {i}: raw_value = {hex(raw_value)}")
         output_vec[i] = Fixed(raw_value, True)
         # output_vec[i] = Fixed(dut.output_data.value.integer, True)
-        
+
         if expect_vec:
             assert abs(output_vec[i].to_float() - expect_vec[i].to_float()) < 1e-3, \
                 f"Mismatch at index {i}: Expected {expect_vec[i]}, Got {output_vec[i]}"
-                
+
         await ClockCycles(dut.clk, 1)
-    
+
     current_time = cocotb.utils.get_sim_time('ns')
     metrics.end_operation("STORE", current_time)
     return output_vec
 
-def pack_vector(vector):
-    """Pack a list of 32-bit integers into a single VECTOR_SIZE*32-bit value."""
-    packed = 0
-    for i, val in enumerate(vector):
-        packed |= (val & 0xFFFFFFFF) << (32 * i)
-    return packed
 
-def unpack_vector(packed_value):
-    result = []
-    for i in range(VECTOR_SIZE):
-        element = (packed_value >> (32 * i)) & 0xFFFFFFFF
-        if element & 0x80000000:
-            element -= (1 << 32)
-        result.append(element)
-    return result
+# def pack_vector(vector):
+#     """Pack a list of 32-bit integers into a single VECTOR_SIZE*32-bit value."""
+#     packed = 0
+#     for i, val in enumerate(vector):
+#         packed |= (val & 0xFFFFFFFF) << (32 * i)
+#     return packed
+#
+# def unpack_vector(packed_value):
+#     result = []
+#     for i in range(VECTOR_SIZE):
+#         element = (packed_value >> (32 * i)) & 0xFFFFFFFF
+#         if element & 0x80000000:
+#             element -= (1 << 32)
+#         result.append(element)
+#     return result
 
 async def reset_dut(dut):
     """Reset the DUT."""
@@ -277,12 +288,12 @@ async def reset_dut(dut):
 
 
 @cocotb.test()
-async def test_quantile_comprehensive(dut):
+async def test_quantile_regression(dut):
     """Comprehensive test for the quantile vector processor."""
-    
+
     # Initialize performance metrics
     metrics = PerformanceMetrics()
-    
+
     # Generate clock
     clock = Clock(dut.clk, 10, units="ns")
     cocotb.start_soon(clock.start())
@@ -292,29 +303,28 @@ async def test_quantile_comprehensive(dut):
 
     # Test cases
     dut._log.info("\n=== Basic Operations Test ===")
-    
+
     # Test vectors
     vec_1 = [Fixed(x) for x in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]
     vec_2 = [Fixed(x) for x in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]]
-    
+
     # Load test vectors
     await load(dut, metrics, "x1", vec_1)
     await load(dut, metrics, "x2", vec_2)
-     
+
     # Test ADD
     await instruction(dut, metrics, "ADD", "x3", "x1", "x2")
     result = await store(dut, metrics, "x3")
     expected = [a + b for a, b in zip(vec_1, vec_2)]
     dut._log.info(f"ADD result: {result}")
     assert result == expected, "Wrong ADD result"
-    
+
     # Test SUB
     await instruction(dut, metrics, "SUB", "x4", "x1", "x2")
     result = await store(dut, metrics, "x4")
     expected = [a - b for a, b in zip(vec_1, vec_2)]
     dut._log.info(f"SUB result: {result}")
     assert result == expected, "Wrong SUB result"
-
 
     dut._log.info("\n=== Testing Vector-Scalar Multiplication ===")
 
@@ -330,45 +340,44 @@ async def test_quantile_comprehensive(dut):
     # Test single multiplication first
     input_val = Fixed(2.0)
     scalar_val = Fixed(0.5)
-    
+
     dut._log.info(f"Testing single multiplication:")
     dut._log.info(f"Input: {input_val.to_float()} (raw: {hex(input_val.to_binary())})")
     dut._log.info(f"Scalar: {scalar_val.to_float()} (raw: {hex(scalar_val.to_binary())})")
-    
+
     # Load test values
     test_vec = [input_val] + [Fixed(0.0)] * 7
     scalar_vec = [scalar_val] + [Fixed(0.0)] * 7
-    
+
     await load(dut, metrics, "x1", test_vec)
     await load(dut, metrics, "x2", scalar_vec)
-    
+
     # Perform multiplication
     await instruction(dut, metrics, "MUL", "x3", "x1", "x2", 0)
     result = await store(dut, metrics, "x3")
     expected = Fixed(1.0)  # 2.0 * 0.5
-    
+
     dut._log.info(f"Expected: {expected.to_float()} (raw: {hex(expected.to_binary())})")
     dut._log.info(f"Got: {result[0].to_float()} (raw: {hex(result[0].to_binary())})")
-    
+
     # Now test full vector multiplication
     mul_vec = [Fixed(x) for x in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]
     scalar_vec = [Fixed(0.5)] + [Fixed(0.0)] * 7
-    
+
     await load(dut, metrics, "x1", mul_vec)
     await load(dut, metrics, "x2", scalar_vec)
-    
+
     # Test multiplication with scalar
     await instruction(dut, metrics, "MUL", "x3", "x1", "x2", 0)
     result = await store(dut, metrics, "x3")
     expected = [a * scalar_vec[0] for a in mul_vec]
-    
+
     dut._log.info("\nFull vector multiplication test:")
     for i in range(VECTOR_SIZE):
         dut._log.info(f"Index {i}:")
         dut._log.info(f"Input: {mul_vec[i].to_float()} (raw: {hex(mul_vec[i].to_binary())})")
         dut._log.info(f"Expected: {expected[i].to_float()} (raw: {hex(expected[i].to_binary())})")
         dut._log.info(f"Got: {result[i].to_float()} (raw: {hex(result[i].to_binary())})")
-        
 
     '''
     # Test multiplication with different scalars
@@ -385,28 +394,27 @@ async def test_quantile_comprehensive(dut):
             "Multiplication result mismatch"
     '''
     dut._log.info("\n=== Edge Cases Test ===")
-    
+
     # Edge case vectors
-    edge_vec1 = [Fixed(x) for x in [0.0, -0.0, (2**15)-1, -(2**15), (2**15)-1, -(2**15), 1e3, -1e3]]
+    edge_vec1 = [Fixed(x) for x in [0.0, -0.0, (2 ** 15) - 1, -(2 ** 15), (2 ** 15) - 1, -(2 ** 15), 1e3, -1e3]]
     edge_vec2 = [Fixed(x) for x in [1.0, -1.0, 2.0, -2.0, 0.5, -0.5, 0.1, -0.1]]
-    
+
     await load(dut, metrics, "x6", edge_vec1)
     await load(dut, metrics, "x7", edge_vec2)
-    
+
     # Test operations with edge cases
     await instruction(dut, metrics, "ADD", "x8", "x6", "x7")
     result = await store(dut, metrics, "x8")
     # expected = [a + b for a, b in zip(edge_vec1, edge_vec2)]
     dut._log.info(f"Edge case ADD result: {result}")
     # dut._log.info(f"Edge case expected ADD result: {expected}")
- 
-    
+
     # # Test division by zero handling
     # zero_vec = [Fixed(0.0)] * VECTOR_SIZE
     # await load(dut, metrics, "x9", zero_vec)
     # await instruction(dut, metrics, "DIV", "x10", "x1", "x9", 0)
     # result = await store(dut, metrics, "x10")
     # dut._log.info(f"Division by zero result: {result}")
-    
+
     # Print performance metrics
     metrics.print_metrics()

@@ -124,8 +124,8 @@ class Fixed:
         result_raw = self.raw + other.raw
         # Simulate overflow by wrapping the result within 32-bit signed range
         result_raw &= 0xFFFFFFFF
-        if Fixed.OVERFLOW_CHECK and (result_raw > 0x7FFFFFFF or result_raw < -0x80000000):
-            raise OverflowError("Overflow occurred during addition.")
+        # if Fixed.OVERFLOW_CHECK and (result_raw > 0x7FFFFFFF or result_raw < -0x80000000):
+        #     raise OverflowError("Overflow occurred during addition.")
         return Fixed(result_raw, from_raw=True)
 
     def __sub__(self, other):
@@ -192,10 +192,6 @@ async def instruction(dut, metrics, opname, rd, rs1, rs2, index=0):
     rs2_address = int(rs2[1:])
     instruction = (opcode << 28) | (rs2_address << 23) | (rs1_address << 18) | (rd_address << 13) | (index << 8)
 
-    # Log details
-    dut._log.info(f"{opname} {rd} {rs1} {rs2} {index}")
-    dut._log.info(f"rd: {rd_address}, Opcode: {bin(opcode)[2:]}")
-
     dut.instruction.value = instruction
     await ClockCycles(dut.clk, 1)
     
@@ -230,7 +226,7 @@ async def store(dut, metrics, rs2, expect_vec=None):
     output_vec = [None] * VECTOR_SIZE
 
     # Add debug output
-    # dut._log.info(f"\nSTORE operation debug:")
+    dut._log.info(f"\nSTORE operation debug:")
     dut._log.info(f"rs2_address: {rs2_address}")
     dut._log.info(f"instruction: {hex(instruction)}")
 
@@ -407,6 +403,65 @@ async def test_quantile_comprehensive(dut):
     # await instruction(dut, metrics, "DIV", "x10", "x1", "x9", 0)
     # result = await store(dut, metrics, "x10")
     # dut._log.info(f"Division by zero result: {result}")
+
+    num_tests = 10
+    random_vectors = []
+    for _ in range(num_tests):
+        vector = []
+        for _ in range(VECTOR_SIZE):
+            # Use smaller range to avoid overflow
+            value = random.uniform(-5.0, 5.0)  # Reduced from ±10 to ±5
+            vector.append(Fixed(value))
+        random_vectors.append(vector)
     
+    # Test each random vector
+    for i, vector in enumerate(random_vectors):
+        dut._log.info(f"\nTesting random vector {i}:")
+        dut._log.info(f"Input values: {[v.to_float() for v in vector]}")
+        
+        # Write vector to register
+        await load(dut, metrics, "x1", vector)
+        
+        # Test ADD with different vector
+        other_vector = [Fixed(random.uniform(-2.0, 2.0)) for _ in range(VECTOR_SIZE)]  # Even smaller range for addition
+        await load(dut, metrics, "x2", other_vector)
+        await instruction(dut, metrics, "ADD", "x3", "x1", "x2")
+        add_result = await store(dut, metrics, "x3")
+        expected_add = [Fixed(a.to_float() + b.to_float()) for a, b in zip(vector, other_vector)]
+        dut._log.info(f"ADD result: {[v.to_float() for v in add_result]}")
+        dut._log.info(f"Expected ADD: {[v.to_float() for v in expected_add]}")
+        
+        # Test SUB
+        await instruction(dut, metrics, "SUB", "x4", "x1", "x2")
+        sub_result = await store(dut, metrics, "x4")
+        expected_sub = [Fixed(a.to_float() - b.to_float()) for a, b in zip(vector, other_vector)]
+        dut._log.info(f"SUB result: {[v.to_float() for v in sub_result]}")
+        dut._log.info(f"Expected SUB: {[v.to_float() for v in expected_sub]}")
+        
+        # Test MUL with scalar
+        scalar_index = random.randint(0, VECTOR_SIZE-1)
+        scalar_value = Fixed(random.uniform(-1.0, 1.0))  # Use small scalar for multiplication
+        scalar_vector = [scalar_value] + [Fixed(0.0)] * (VECTOR_SIZE-1)
+        await load(dut, metrics, "x2", scalar_vector)
+        await instruction(dut, metrics, "MUL", "x5", "x1", "x2", 0)
+        mul_result = await store(dut, metrics, "x5")
+        expected_mul = [Fixed(v.to_float() * scalar_value.to_float()) for v in vector]
+        dut._log.info(f"MUL result: {[v.to_float() for v in mul_result]}")
+        dut._log.info(f"Expected MUL: {[v.to_float() for v in expected_mul]}")
+        
+        # Verify results within tolerance
+        for actual, expected in zip(add_result, expected_add):
+            assert abs(actual.to_float() - expected.to_float()) < 0.1, \
+                f"ADD mismatch: got {actual.to_float()}, expected {expected.to_float()}"
+        
+        for actual, expected in zip(sub_result, expected_sub):
+            assert abs(actual.to_float() - expected.to_float()) < 0.1, \
+                f"SUB mismatch: got {actual.to_float()}, expected {expected.to_float()}"
+        
+        for actual, expected in zip(mul_result, expected_mul):
+            assert abs(actual.to_float() - expected.to_float()) < 0.1, \
+                f"MUL mismatch: got {actual.to_float()}, expected {expected.to_float()}"
+
+
     # Print performance metrics
     metrics.print_metrics()
