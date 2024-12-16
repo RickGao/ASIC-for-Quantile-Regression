@@ -96,12 +96,14 @@ def draw_points_and_lines(X, y, betas, quantiles):
 if __name__ == "__main__":
     # Generate data
     np.random.seed()
-    n_samples = 200
-    n_features = 2  # Change this number to adjust dimensions (e.g., 1, 2, 3, etc.)
+    n_samples = 8
+    n_features = 7  # Change this number to adjust dimensions (e.g., 1, 2, 3, etc.)
 
     print("Generating data points...")
     # Generate X
     X = np.random.uniform(-3, 3, (n_samples, n_features))
+    # print(f"X shape: {X.shape}")
+    # print(f"X:\n{X}")
 
     # Generate y with increasing variance
     true_beta = np.array([1] + [2] * n_features)  # [intercept] + [slopes]
