@@ -321,18 +321,6 @@ def load_data_from_txt(filename="data.txt"):
         y = np.loadtxt(lines[separator_index + 1:])
     return X, y
 
-def dump_result_to_file(result, filename="result.txt"):
-    """
-    Dump the result to a file in comma-separated format.
-
-    Parameters:
-    result: List of floats or Fixed-point numbers
-    filename: Name of the file to save the result
-    """
-    with open(filename, "w") as f:
-        result_floats = [str(x) for x in result]
-        f.write(",".join(result_floats))
-    print(f"Results successfully saved to {filename}")
 
 
 def convert_matrix_to_fixed_vectors(matrix):
@@ -422,6 +410,17 @@ async def quantile_regression_hardware(dut, metrics, X, y, tau, learning_rate=0.
     result = await store(dut, metrics, beta_reg)
     return result
 
+def save_list_to_file(data_list, filename="result.txt"):
+    """
+    Save a list to a file in its literal Python representation.
+
+    Parameters:
+    data_list: List of lists (e.g., beta coefficients).
+    filename: Name of the file to save the data.
+    """
+    with open(filename, "w") as f:
+        f.write(repr(data_list))  # Save list as a literal representation
+
 
 
 @cocotb.test()
@@ -444,11 +443,19 @@ async def test_quantile_regression(dut):
     # print(X)
     # print(y)
 
-    result = await quantile_regression_hardware(dut, metrics, X, y, 0.5, learning_rate=0.01, max_iterations=3000)
+    quantiles = [0.1, 0.25, 0.5, 0.75, 0.9]
+
+    result = []
+
+    for tau in quantiles:
+
+        result_vector = await quantile_regression_hardware(dut, metrics, X, y, tau, learning_rate=0.01, max_iterations=3000)
+
+        result.append(result_vector)
 
     dut._log.info(f"Result: {result}")
 
-    dump_result_to_file(result, "result.txt")
+    save_list_to_file(result, "result.txt")
 
 
     # Print performance metrics

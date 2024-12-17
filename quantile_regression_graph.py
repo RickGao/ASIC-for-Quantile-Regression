@@ -123,7 +123,7 @@ def quantile_regression(X, y, tau=0.5, learning_rate=0.01, max_iterations=1000, 
         beta = beta_new
     return beta
 
-def draw_points_and_lines(X, y, betas, quantiles):
+def draw_points_and_lines(X, y, betas, quantiles, title):
     """
     Simple drawing function to show data points and fitted lines
     X: input features
@@ -156,7 +156,7 @@ def draw_points_and_lines(X, y, betas, quantiles):
                  label=f'{int(tau * 100)}th percentile')
         print(f"Fitted line for {int(tau * 100)}th percentile")
 
-    plt.title('Data Points and Quantile Regression Lines')
+    plt.title(title, fontsize=16)
     plt.xlabel('Feature 1')
     plt.ylabel('y')
     plt.grid(True, alpha=0.3)
@@ -203,17 +203,32 @@ def load_data_from_txt(filename="data.txt"):
     return X, y
 
 
+def load_list_from_file(filename="result.txt"):
+    """
+    Load a list from a file containing its literal Python representation.
+
+    Parameters:
+    filename: Name of the file containing the list.
+
+    Returns:
+    Loaded Python list.
+    """
+    with open(filename, "r") as f:
+        data_list = eval(f.read())  # Safely evaluate the literal representation
+    return data_list
+
+
 if __name__ == "__main__":
     # Example usage
-    n_samples = 100
+    n_samples = 8
     n_features = 7
 
     print("Generating dataset...")
     X, y = generate_data_with_intercept(n_samples=n_samples, n_features=n_features, outlier_ratio=0.125)
 
-    # save_data_to_txt(X, y, "data_large.txt")
-    #
-    # X, y = load_data_from_txt("data_large.txt")
+    # save_data_to_txt(X, y, "data.txt")
+
+    X, y = load_data_from_txt("data.txt")
 
     print("\nFitting quantile regression models...")
     quantiles = [0.1, 0.25, 0.5, 0.75, 0.9]
@@ -229,5 +244,12 @@ if __name__ == "__main__":
 
     # print(betas)
 
-    print("\nCreating visualization...")
-    draw_points_and_lines(X, y, betas, quantiles)
+    print("\nCreating visualization software result...")
+    draw_points_and_lines(X, y, betas, quantiles, "Quantile Regression Software Result")
+
+    # Load beta coefficients from result.txt
+    print("Loading beta coefficients from result.txt...")
+    result = load_list_from_file("result.txt")
+
+    print("\nCreating visualization hardware result...")
+    draw_points_and_lines(X, y, betas, quantiles, "Quantile Regression Hardware Result")
