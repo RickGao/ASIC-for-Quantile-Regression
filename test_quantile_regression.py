@@ -1,11 +1,15 @@
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer, FallingEdge, ClockCycles
+from cocotb.triggers import RisingEdge, Timer, ClockCycles
 import random
 import math
 from collections import defaultdict
+import numpy as np
+
 
 VECTOR_SIZE = 8
+
+SHOW_INSTRUCTIONS = 0
 
 # Instruction opcodes
 OPCODES = {
@@ -48,10 +52,11 @@ class PerformanceMetrics:
         print(f"\nTotal Cycles: {self.total_cycles}")
 
 
+
 class Fixed:
     OVERFLOW_CHECK = True  # Global constant to enable or disable overflow checking
 
-    def __init__(self, value=0, from_raw=False):
+    def __init__(self, value, from_raw=False):
         """
         Initialize the fixed-point number.
         :param value: A floating-point number or a 32-bit integer representing fixed-point.
@@ -196,8 +201,10 @@ async def instruction(dut, metrics, opname, rd, rs1, rs2, index=0):
     instruction = (opcode << 28) | (rs2_address << 23) | (rs1_address << 18) | (rd_address << 13) | (index << 8)
 
     # Log details
-    dut._log.info(f"{opname} {rd} {rs1} {rs2} {index}")
-    dut._log.info(f"rd: {rd_address}, Opcode: {bin(opcode)[2:]}")
+    if (SHOW_INSTRUCTIONS):
+        dut._log.info(f"{opname} {rd} {rs1} {rs2} {index}")
+        dut._log.info(f"rd: {rd_address}, Opcode: {bin(opcode)[2:]}")
+        print()
 
     dut.instruction.value = instruction
     await ClockCycles(dut.clk, 1)
@@ -214,8 +221,10 @@ async def load(dut, metrics, rd, input_vec):
     rd_address = int(rd[1:])
     instruction = (opcode << 28) | (rd_address << 13)
 
-    dut._log.info(f"LOAD {rd} {input_vec}")
-    dut._log.info(f"rd: {rd_address}, Opcode: {bin(opcode)[2:]}")
+    if (SHOW_INSTRUCTIONS):
+        dut._log.info(f"LOAD {rd} {input_vec}")
+        dut._log.info(f"rd: {rd_address}, Opcode: {bin(opcode)[2:]}")
+        print()
 
     for i in range(VECTOR_SIZE):
         dut.instruction.value = instruction | (i << 8)
@@ -236,8 +245,10 @@ async def store(dut, metrics, rs2, expect_vec=None):
 
     output_vec = [None] * VECTOR_SIZE
 
-    dut._log.info(f"STORE {rs2}")
-    dut._log.info(f"rs2: {rs2_address}, Opcode: {bin(opcode)[2:]}")
+    if (SHOW_INSTRUCTIONS):
+        dut._log.info(f"STORE {rs2}")
+        dut._log.info(f"rs2: {rs2_address}, Opcode: {bin(opcode)[2:]}")
+        print()
 
     # Add debug output
     # dut._log.info(f"\nSTORE operation debug:")
@@ -260,6 +271,7 @@ async def store(dut, metrics, rs2, expect_vec=None):
 
     current_time = cocotb.utils.get_sim_time('ns')
     metrics.end_operation("STORE", current_time)
+
     return output_vec
 
 
@@ -287,6 +299,131 @@ async def reset_dut(dut):
     await RisingEdge(dut.clk)  # Wait for another clock cycle
 
 
+
+def load_data_from_txt(filename="data.txt"):
+    """
+    Load the feature matrix X and target vector y from a txt file.
+
+    Parameters:
+    filename: Input file name (default: "data.txt")
+
+    Returns:
+    X: Feature matrix
+    y: Target variable
+    """
+    with open(filename, "r") as f:
+        lines = f.readlines()
+        # Find the separator between X and y
+        separator_index = lines.index("# Target Variable\n")
+        # Parse X
+        X = np.loadtxt(lines[:separator_index])
+        # Parse y
+        y = np.loadtxt(lines[separator_index + 1:])
+    return X, y
+
+def dump_result_to_file(result, filename="result.txt"):
+    """
+    Dump the result to a file in comma-separated format.
+
+    Parameters:
+    result: List of floats or Fixed-point numbers
+    filename: Name of the file to save the result
+    """
+    with open(filename, "w") as f:
+        result_floats = [str(x) for x in result]
+        f.write(",".join(result_floats))
+    print(f"Results successfully saved to {filename}")
+
+
+def convert_matrix_to_fixed_vectors(matrix):
+    """
+    Convert a matrix into a list of Fixed-point vectors (column-wise).
+
+    Parameters:
+    matrix: 2D NumPy array
+
+    Returns:
+    List of lists, where each sublist is a Fixed-point column vector.
+    """
+    fixed_vectors = []
+    for col in matrix.T:  # Iterate over columns
+        fixed_vectors.append([Fixed(value) for value in col])
+    return fixed_vectors
+
+
+async def quantile_regression_hardware(dut, metrics, X, y, tau, learning_rate=0.01, max_iterations=1000):
+    scalar_vec = [Fixed(learning_rate), Fixed(X.shape[0])] + [Fixed(0)] * (VECTOR_SIZE - 2)
+    tau_vec = [Fixed(tau)] * VECTOR_SIZE
+    y_vec = [Fixed(value) for value in y]
+    X_columns = convert_matrix_to_fixed_vectors(X)
+    Xt = np.transpose(X)
+    Xt_columns = convert_matrix_to_fixed_vectors(Xt)
+
+    beta_reg = "x1"
+    r_reg = "x2"
+    i_reg = "x3"
+    descent_reg = "x7"
+    grad_reg = "x8"
+    xt_mul_reg = "x9"
+    i_minus_tau_reg = "x10"
+    xb_reg = "x11"
+    mul_reg = "x12"
+    scalar_reg = "x13"
+    tau_reg = "x14"
+    y_reg = "x15"
+
+    await load(dut, metrics, beta_reg, [Fixed(0)] * VECTOR_SIZE)
+    await load(dut, metrics, scalar_reg, scalar_vec)
+    await load(dut, metrics, tau_reg, tau_vec)
+    await load(dut, metrics, y_reg, y_vec)
+
+    for i in range(VECTOR_SIZE):
+        await load(dut, metrics, f"x{i + 16}", X_columns[i])
+
+    for i in range(VECTOR_SIZE):
+        await load(dut, metrics, f"x{i + 24}", Xt_columns[i])
+
+
+    for iter in range(max_iterations):
+
+        dut._log.info(f"Iteration {iter}")
+        # Calculate Residual r
+        await load(dut, metrics, xb_reg, [Fixed(0)] * VECTOR_SIZE)
+        for i in range(VECTOR_SIZE):
+            await instruction(dut, metrics, "MUL", mul_reg, f"x{i + 16}", beta_reg, index=i)
+            await instruction(dut, metrics, "ADD", xb_reg, xb_reg, mul_reg)
+
+        # print(await store(dut, metrics, y_reg))
+        # print(await store(dut, metrics, xb_reg))
+        await instruction(dut, metrics, "SUB", r_reg, y_reg, xb_reg)
+        # print(await store(dut, metrics, r_reg))
+
+
+        # Compute Indicator Function I
+        await instruction(dut, metrics, "SLT", i_reg, r_reg, "x0")
+        # print(await store(dut, metrics, i_reg))
+
+        # Compute Gradient
+        await instruction(dut, metrics, "SUB", i_minus_tau_reg, i_reg, tau_reg)
+        # print(await store(dut, metrics, i_minus_tau_reg))
+        await load(dut, metrics, xt_mul_reg, [Fixed(0)] * VECTOR_SIZE)
+        for i in range(VECTOR_SIZE):
+            await instruction(dut, metrics, "MUL", mul_reg, f"x{i + 24}", i_minus_tau_reg, index=i)
+            # print((await store(dut, metrics, mul_reg)))
+            await instruction(dut, metrics, "ADD", xt_mul_reg, xt_mul_reg, mul_reg)
+            # print((await store(dut, metrics, xt_mul_reg)))
+        # print(await store(dut, metrics, xt_mul_reg))
+        await instruction(dut, metrics, "DIV", grad_reg, xt_mul_reg, scalar_reg, index=1)
+
+        # Update Parameters Beta
+        await instruction(dut, metrics, "MUL", descent_reg, grad_reg, scalar_reg, index=0)
+        await instruction(dut, metrics, "SUB", beta_reg, beta_reg, descent_reg)
+
+    result = await store(dut, metrics, beta_reg)
+    return result
+
+
+
 @cocotb.test()
 async def test_quantile_regression(dut):
     """Comprehensive test for the quantile vector processor."""
@@ -298,123 +435,21 @@ async def test_quantile_regression(dut):
     clock = Clock(dut.clk, 10, units="ns")
     cocotb.start_soon(clock.start())
 
+
     # Reset DUT
     await reset_dut(dut)
 
-    # Test cases
-    dut._log.info("\n=== Basic Operations Test ===")
+    X, y = load_data_from_txt()
 
-    # Test vectors
-    vec_1 = [Fixed(x) for x in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]
-    vec_2 = [Fixed(x) for x in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]]
+    # print(X)
+    # print(y)
 
-    # Load test vectors
-    await load(dut, metrics, "x1", vec_1)
-    await load(dut, metrics, "x2", vec_2)
+    result = await quantile_regression_hardware(dut, metrics, X, y, 0.5, learning_rate=0.01, max_iterations=3000)
 
-    # Test ADD
-    await instruction(dut, metrics, "ADD", "x3", "x1", "x2")
-    result = await store(dut, metrics, "x3")
-    expected = [a + b for a, b in zip(vec_1, vec_2)]
-    dut._log.info(f"ADD result: {result}")
-    assert result == expected, "Wrong ADD result"
+    dut._log.info(f"Result: {result}")
 
-    # Test SUB
-    await instruction(dut, metrics, "SUB", "x4", "x1", "x2")
-    result = await store(dut, metrics, "x4")
-    expected = [a - b for a, b in zip(vec_1, vec_2)]
-    dut._log.info(f"SUB result: {result}")
-    assert result == expected, "Wrong SUB result"
+    dump_result_to_file(result, "result.txt")
 
-    dut._log.info("\n=== Testing Vector-Scalar Multiplication ===")
-
-    # Test MUL
-    for i in range(VECTOR_SIZE):
-        await instruction(dut, metrics, "MUL", "x5", "x1", "x2", i)
-        result = await store(dut, metrics, "x5")
-        expected = [a * vec_2[i] for a in vec_1]
-        dut._log.info(f"MUL result (scalar={vec_2[i]}): {result}")
-        # dut._log.info(f"Expected MUL result: {expected}")
-    # assert result == expected, "Wrong MUL result"
-
-    # Test single multiplication first
-    input_val = Fixed(2.0)
-    scalar_val = Fixed(0.5)
-
-    dut._log.info(f"Testing single multiplication:")
-    dut._log.info(f"Input: {input_val.to_float()} (raw: {hex(input_val.to_binary())})")
-    dut._log.info(f"Scalar: {scalar_val.to_float()} (raw: {hex(scalar_val.to_binary())})")
-
-    # Load test values
-    test_vec = [input_val] + [Fixed(0.0)] * 7
-    scalar_vec = [scalar_val] + [Fixed(0.0)] * 7
-
-    await load(dut, metrics, "x1", test_vec)
-    await load(dut, metrics, "x2", scalar_vec)
-
-    # Perform multiplication
-    await instruction(dut, metrics, "MUL", "x3", "x1", "x2", 0)
-    result = await store(dut, metrics, "x3")
-    expected = Fixed(1.0)  # 2.0 * 0.5
-
-    dut._log.info(f"Expected: {expected.to_float()} (raw: {hex(expected.to_binary())})")
-    dut._log.info(f"Got: {result[0].to_float()} (raw: {hex(result[0].to_binary())})")
-
-    # Now test full vector multiplication
-    mul_vec = [Fixed(x) for x in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]]
-    scalar_vec = [Fixed(0.5)] + [Fixed(0.0)] * 7
-
-    await load(dut, metrics, "x1", mul_vec)
-    await load(dut, metrics, "x2", scalar_vec)
-
-    # Test multiplication with scalar
-    await instruction(dut, metrics, "MUL", "x3", "x1", "x2", 0)
-    result = await store(dut, metrics, "x3")
-    expected = [a * scalar_vec[0] for a in mul_vec]
-
-    dut._log.info("\nFull vector multiplication test:")
-    for i in range(VECTOR_SIZE):
-        dut._log.info(f"Index {i}:")
-        dut._log.info(f"Input: {mul_vec[i].to_float()} (raw: {hex(mul_vec[i].to_binary())})")
-        dut._log.info(f"Expected: {expected[i].to_float()} (raw: {hex(expected[i].to_binary())})")
-        dut._log.info(f"Got: {result[i].to_float()} (raw: {hex(result[i].to_binary())})")
-
-    '''
-    # Test multiplication with different scalars
-    for i in range(VECTOR_SIZE):
-        await instruction(dut, metrics, "MUL", "x5", "x1", "x2", i)
-        result = await store(dut, metrics, "x5")
-        expected = [a * vec_2[i] for a in vec_1]
-        dut._log.info(f"MUL test {i}:")
-        dut._log.info(f"Input vector: {vec_1}")
-        dut._log.info(f"Scalar: {vec_2[i]}")
-        dut._log.info(f"Expected: {expected}")
-        dut._log.info(f"Got: {result}")
-        assert all(abs(r.to_float() - e.to_float()) < 1e-3 for r, e in zip(result, expected)), \
-            "Multiplication result mismatch"
-    '''
-    dut._log.info("\n=== Edge Cases Test ===")
-
-    # Edge case vectors
-    edge_vec1 = [Fixed(x) for x in [0.0, -0.0, (2 ** 15) - 1, -(2 ** 15), (2 ** 15) - 1, -(2 ** 15), 1e3, -1e3]]
-    edge_vec2 = [Fixed(x) for x in [1.0, -1.0, 2.0, -2.0, 0.5, -0.5, 0.1, -0.1]]
-
-    await load(dut, metrics, "x6", edge_vec1)
-    await load(dut, metrics, "x7", edge_vec2)
-
-    # Test operations with edge cases
-    await instruction(dut, metrics, "ADD", "x8", "x6", "x7")
-    result = await store(dut, metrics, "x8")
-    # expected = [a + b for a, b in zip(edge_vec1, edge_vec2)]
-    dut._log.info(f"Edge case ADD result: {result}")
-    # dut._log.info(f"Edge case expected ADD result: {expected}")
-
-    # # Test division by zero handling
-    # zero_vec = [Fixed(0.0)] * VECTOR_SIZE
-    # await load(dut, metrics, "x9", zero_vec)
-    # await instruction(dut, metrics, "DIV", "x10", "x1", "x9", 0)
-    # result = await store(dut, metrics, "x10")
-    # dut._log.info(f"Division by zero result: {result}")
 
     # Print performance metrics
     metrics.print_metrics()

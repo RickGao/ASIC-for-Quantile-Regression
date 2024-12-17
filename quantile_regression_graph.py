@@ -1,7 +1,81 @@
-
 import numpy as np
 import matplotlib.pyplot as plt
 
+def generate_data_with_intercept(n_samples=100, n_features=5, outlier_ratio=0.125, random_seed=None):
+    """
+    Generate a dataset for quantile regression with an intercept column added and some outliers.
+
+    Parameters:
+    n_samples: Number of samples
+    n_features: Number of features (excluding intercept)
+    outlier_ratio: Proportion of samples to be treated as outliers
+    random_seed: Seed for reproducibility (default: None)
+
+    Returns:
+    X: Feature matrix with intercept (shape: n_samples x (n_features + 1))
+    y: Target variable
+    """
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    # Generate feature matrix without intercept
+    X = np.random.uniform(-3, 3, (n_samples, n_features))
+
+    # Generate true coefficients for features and intercept
+    true_beta = np.array([1] + [2] * n_features)  # Intercept + slopes
+
+    # Add intercept column (a column of ones)
+    X_with_intercept = np.c_[np.ones(n_samples), X]
+
+    # Generate noise with variance dependent on feature values
+    noise = np.random.normal(0, 0.5 + 0.5 * np.abs(X).mean(axis=1), n_samples)
+
+    # Calculate target variable y
+    y = X_with_intercept @ true_beta + noise
+
+    # Introduce outliers
+    n_outliers = int(outlier_ratio * n_samples)
+    outlier_indices = np.random.choice(n_samples, n_outliers, replace=False)
+    y[outlier_indices] += np.random.normal(0, 5, size=n_outliers)  # Add large noise to outliers
+
+    return X_with_intercept, y
+
+def matrix_transpose(matrix):
+    """
+    Transpose a given matrix.
+
+    Parameters:
+    matrix: Input matrix (2D array)
+
+    Returns:
+    Transposed matrix
+    """
+    return np.transpose(matrix)
+
+def plot_data(X, y):
+    """
+    Plot the data points, highlighting outliers.
+
+    Parameters:
+    X: Feature matrix with intercept (n_samples x (n_features + 1))
+    y: Target variable
+    """
+    # Use the first feature for plotting
+    x_values = X[:, 1]
+
+    # Highlight outliers
+    outlier_threshold = np.percentile(np.abs(y - y.mean()), 87.5)  # Top 12.5% as outliers
+    outliers = np.abs(y - y.mean()) > outlier_threshold
+
+    plt.figure(figsize=(10, 6))
+    plt.scatter(x_values[~outliers], y[~outliers], color='blue', label='Inliers', alpha=0.6)
+    plt.scatter(x_values[outliers], y[outliers], color='red', label='Outliers', alpha=0.6)
+    plt.title('Data Points with Outliers Highlighted')
+    plt.xlabel('Feature 1')
+    plt.ylabel('Target Variable')
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.show()
 
 def quantile_regression(X, y, tau=0.5, learning_rate=0.01, max_iterations=1000, epsilon=1e-6):
     """
@@ -19,7 +93,6 @@ def quantile_regression(X, y, tau=0.5, learning_rate=0.01, max_iterations=1000, 
     beta: fitted parameters [intercept, slope(s)]
     """
     # Add intercept term to X (add a column of ones for the intercept term)
-    X = np.c_[np.ones(X.shape[0]), X]
     n_samples, n_features = X.shape
 
     # Initialize parameters (beta) to zeros
@@ -36,8 +109,7 @@ def quantile_regression(X, y, tau=0.5, learning_rate=0.01, max_iterations=1000, 
         I = (r < 0).astype(float)
 
         # Step 3: Calculate gradient
-        tau_minus_I = tau - I  # Vector subtraction (weight for each observation)
-        gradient = -X.T @ tau_minus_I / n_samples  # Matrix-Vector multiplication and scaling
+        gradient = X.T @ (I - tau) / n_samples
 
         # Step 4: Update parameters using gradient descent
         beta_new = beta - learning_rate * gradient
@@ -50,7 +122,6 @@ def quantile_regression(X, y, tau=0.5, learning_rate=0.01, max_iterations=1000, 
 
         beta = beta_new
     return beta
-
 
 def draw_points_and_lines(X, y, betas, quantiles):
     """
@@ -65,71 +136,98 @@ def draw_points_and_lines(X, y, betas, quantiles):
 
     # First draw all points
     print("Drawing data points...")
-    plt.scatter(X[:, 0], y, color='gray', alpha=0.5, s=30, label='Data points')
+    plt.scatter(X[:, 1], y, color='gray', alpha=0.5, s=30, label='Data points')
 
-    # Then draw lines for each quantile
-    print("\nDrawing fitted lines...")
-    x_range = np.linspace(X[:, 0].min(), X[:, 0].max(), 100).reshape(-1, 1)
-    if X.shape[1] > 1:
-        # For multiple features, use mean values for features beyond the first
-        X_means = X[:, 1:].mean(axis=0)
-        X_plot = np.hstack([x_range] + [np.full_like(x_range, mean) for mean in X_means])
+    # Extract the first feature for plotting
+    x_range = np.linspace(X[:, 1].min(), X[:, 1].max(), 100).reshape(-1, 1)
+
+    # Handle higher-dimensional features by averaging other features
+    if X.shape[1] > 2:  # Beyond intercept and first feature
+        other_features = X[:, 2:].mean(axis=0)
+        other_features = np.tile(other_features, (x_range.shape[0], 1))
+        X_plot = np.c_[np.ones(len(x_range)), x_range, other_features]
     else:
-        X_plot = x_range
-    X_plot = np.c_[np.ones(len(x_range)), X_plot]
+        X_plot = np.c_[np.ones(len(x_range)), x_range]
 
     colors = ['blue', 'green', 'red', 'purple', 'orange']
     for beta, tau, color in zip(betas, quantiles, colors):
         y_line = X_plot @ beta
         plt.plot(x_range, y_line, color=color, linewidth=2,
-                label=f'{int(tau * 100)}th percentile')
+                 label=f'{int(tau * 100)}th percentile')
         print(f"Fitted line for {int(tau * 100)}th percentile")
 
     plt.title('Data Points and Quantile Regression Lines')
-    plt.xlabel('X')
+    plt.xlabel('Feature 1')
     plt.ylabel('y')
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.show()
 
 
+def save_data_to_txt(X, y, filename="data.txt"):
+    """
+    Save the feature matrix X and target vector y to a txt file.
+
+    Parameters:
+    X: Feature matrix
+    y: Target variable
+    filename: Output file name (default: "data.txt")
+    """
+    with open(filename, "w") as f:
+        # Save X
+        f.write("# Feature Matrix\n")
+        np.savetxt(f, X)
+        f.write("\n# Target Variable\n")
+        # Save y
+        np.savetxt(f, y)
+
+def load_data_from_txt(filename="data.txt"):
+    """
+    Load the feature matrix X and target vector y from a txt file.
+
+    Parameters:
+    filename: Input file name (default: "data.txt")
+
+    Returns:
+    X: Feature matrix
+    y: Target variable
+    """
+    with open(filename, "r") as f:
+        lines = f.readlines()
+        # Find the separator between X and y
+        separator_index = lines.index("# Target Variable\n")
+        # Parse X
+        X = np.loadtxt(lines[:separator_index])
+        # Parse y
+        y = np.loadtxt(lines[separator_index + 1:])
+    return X, y
+
+
 if __name__ == "__main__":
-    # Generate data
-    np.random.seed()
-    n_samples = 8
-    n_features = 7  # Change this number to adjust dimensions (e.g., 1, 2, 3, etc.)
+    # Example usage
+    n_samples = 100
+    n_features = 7
 
-    print("Generating data points...")
-    # Generate X
-    X = np.random.uniform(-3, 3, (n_samples, n_features))
-    # print(f"X shape: {X.shape}")
-    # print(f"X:\n{X}")
+    print("Generating dataset...")
+    X, y = generate_data_with_intercept(n_samples=n_samples, n_features=n_features, outlier_ratio=0.125)
 
-    # Generate y with increasing variance
-    true_beta = np.array([1] + [2] * n_features)  # [intercept] + [slopes]
-    noise = np.random.normal(0, 0.5 + 0.5 * np.abs(X).mean(axis=1), n_samples)
-    y = true_beta[0] + X @ true_beta[1:] + noise
+    # save_data_to_txt(X, y, "data_large.txt")
+    #
+    # X, y = load_data_from_txt("data_large.txt")
 
-    # Add outliers
-    print("Adding outliers...")
-    outlier_idx = np.random.choice(n_samples, n_samples // 10, replace=False)
-    y[outlier_idx] += np.random.normal(0, 5, size=len(outlier_idx))
-
-    # Fit different quantiles
     print("\nFitting quantile regression models...")
     quantiles = [0.1, 0.25, 0.5, 0.75, 0.9]
+    # quantiles = [0.5]
+
     betas = []
 
     for tau in quantiles:
         print(f"Fitting {int(tau * 100)}th percentile...")
-        beta = quantile_regression(X, y, tau=tau)
+        beta = quantile_regression(X, y, tau=tau, max_iterations=3000, learning_rate=0.01)
         betas.append(beta)
-        print(f"Parameters: ", end="")
-        param_names = ["Intercept"] + [f"X{i+1}" for i in range(n_features)]
-        for name, value in zip(param_names, beta):
-            print(f"{name} = {value:.4f}, ", end="")
-        print()
+        print(f"Parameters: {beta}")
 
-    # Draw the points and lines
+    # print(betas)
+
     print("\nCreating visualization...")
     draw_points_and_lines(X, y, betas, quantiles)
