@@ -15,7 +15,7 @@ Instruction Set
 | STORE | 1001           | XXXXX       | 00000       | 00000      | XXXXX        | 00000000       |
 
 
-Testbench develop using cocotb, please refer to cocotb tutorial
+Testbench develop using cocotb, install cocotb with: ```pip install cocotb```, please refer to cocotb tutorial for detailed instructions. 
 
 run quantile_regression_graph.py to generate test data
 
