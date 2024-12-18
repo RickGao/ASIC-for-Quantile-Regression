@@ -17,4 +17,8 @@ Instruction Set
 
 Testbench develop using cocotb, please refer to cocotb tutorial
 
+run quantile_regression_graph.py to generate test data
+
 run make to test the design
+
+run quantile_regression_graph to visualize the result
